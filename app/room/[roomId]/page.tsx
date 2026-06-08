@@ -317,29 +317,31 @@ export default function RoomPage() {
   const timerColor = timePct > 0.5 ? "bg-green-500" : timePct > 0.25 ? "bg-yellow-500" : "bg-red-500"
 
   return (
-    <div className="min-h-screen flex flex-col p-3 gap-3 max-w-7xl mx-auto w-full">
-      {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 bg-gray-900 rounded-xl px-4 py-2">
-          <span className="text-gray-400 text-sm">第</span>
-          <span className="font-bold">{gameState.currentRound}</span>
-          <span className="text-gray-400 text-sm">/ {gameState.totalRounds} 回合</span>
+    <div className="h-screen flex flex-col overflow-hidden max-w-7xl mx-auto w-full">
+
+      {/* ── Header ── */}
+      <div className="flex items-center gap-2 px-2 pt-2 pb-1 shrink-0">
+        {/* Round badge */}
+        <div className="flex items-center gap-1 bg-gray-900 rounded-lg px-2.5 py-1.5 shrink-0">
+          <span className="text-gray-400 text-xs">第</span>
+          <span className="font-bold text-sm">{gameState.currentRound}</span>
+          <span className="text-gray-400 text-xs">/{gameState.totalRounds}</span>
         </div>
 
-        {/* Word hint or drawer word */}
-        <div className="flex-1 flex items-center justify-center bg-gray-900 rounded-xl px-4 py-2">
+        {/* Word hint / drawer word */}
+        <div className="flex-1 flex items-center justify-center bg-gray-900 rounded-lg px-3 py-1.5 min-w-0">
           {isDrawer && myWord ? (
-            <span className="font-bold text-lg text-green-400">
+            <span className="font-bold text-sm text-green-400 truncate">
               ✏️ 你来画：<span className="text-white">{myWord}</span>
             </span>
           ) : gameState.phase === "roundEnd" ? (
-            <span className="text-yellow-400 font-semibold">
-              答案：{gameState.chat.slice(-3).find(m => m.msgType === "system" && m.text.includes("答案"))?.text ?? ""}
+            <span className="text-yellow-400 font-semibold text-sm truncate">
+              {gameState.chat.slice().reverse().find(m => m.msgType === "system" && m.text.includes("答案"))?.text ?? ""}
             </span>
           ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-gray-400 text-sm">{drawerName} 正在画：</span>
-              <span className="font-mono text-lg tracking-[0.3em] font-bold">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-gray-400 text-xs shrink-0 hidden sm:inline">{drawerName} 正在画：</span>
+              <span className="font-mono text-base tracking-[0.25em] font-bold truncate">
                 {gameState.wordHint}
               </span>
             </div>
@@ -347,22 +349,23 @@ export default function RoomPage() {
         </div>
 
         {/* Timer */}
-        <div className="flex items-center gap-2 bg-gray-900 rounded-xl px-4 py-2 min-w-[80px]">
-          <div className="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
+        <div className="flex items-center gap-1.5 bg-gray-900 rounded-lg px-2.5 py-1.5 shrink-0">
+          <div className="w-10 h-1.5 bg-gray-700 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-1000 ${timerColor}`}
               style={{ width: `${timePct * 100}%` }}
             />
           </div>
-          <span className={`font-mono font-bold text-sm ${timePct < 0.25 ? "text-red-400" : "text-white"}`}>
+          <span className={`font-mono font-bold text-sm w-6 text-right ${timePct < 0.25 ? "text-red-400" : "text-white"}`}>
             {timeLeft}
           </span>
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex gap-3 flex-1 min-h-0" style={{ height: "calc(100vh - 140px)" }}>
-        {/* Left: Players */}
+      {/* ── Mobile layout (flex-col) / Desktop layout (flex-row) ── */}
+      <div className="flex-1 flex flex-col md:flex-row gap-2 px-2 pb-2 min-h-0 overflow-hidden">
+
+        {/* ── Desktop: Left players sidebar ── */}
         <div className="w-36 shrink-0 hidden md:block">
           <PlayerList
             players={gameState.players}
@@ -371,17 +374,38 @@ export default function RoomPage() {
           />
         </div>
 
-        {/* Center: Canvas */}
-        <div className="flex-1 flex flex-col gap-2 min-w-0">
-          <Canvas
-            isDrawer={isDrawer}
-            onDraw={handleDraw}
-            onClear={handleClear}
-            color={color}
-            size={size}
-            drawEventQueue={drawEventQueue}
-            clearSignal={clearSignal}
-          />
+        {/* ── Mobile: Players horizontal strip ── */}
+        <div className="flex md:hidden gap-1.5 overflow-x-auto shrink-0 pb-0.5">
+          {gameState.players.map((p) => (
+            <div
+              key={p.id}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg shrink-0 text-xs ${
+                p.id === myId ? "bg-indigo-900/60 border border-indigo-700" : "bg-gray-800"
+              }`}
+            >
+              {p.id === gameState.currentDrawerId ? "✏️" : p.hasGuessed ? "✅" : ""}
+              <span className="font-medium max-w-[60px] truncate">{p.name}</span>
+              <span className="text-yellow-400 font-bold ml-0.5">{p.score}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Center: Canvas + tools ── */}
+        <div className="flex flex-col gap-1.5 min-w-0 md:flex-1">
+          {/* Canvas — full width on mobile, aspect ratio preserved */}
+          <div className="w-full">
+            <Canvas
+              isDrawer={isDrawer}
+              onDraw={handleDraw}
+              onClear={handleClear}
+              color={color}
+              size={size}
+              drawEventQueue={drawEventQueue}
+              clearSignal={clearSignal}
+            />
+          </div>
+
+          {/* Draw tools — compact on mobile */}
           {isDrawer && (
             <DrawTools
               color={color}
@@ -390,31 +414,25 @@ export default function RoomPage() {
               onSizeChange={setSize}
             />
           )}
+
           {!isDrawer && hasGuessed && (
-            <div className="text-center text-green-400 font-semibold bg-green-900/20 rounded-xl py-2">
+            <div className="text-center text-green-400 text-sm font-semibold bg-green-900/20 rounded-xl py-1.5">
               ✅ 你猜对了！等待其他玩家...
             </div>
           )}
         </div>
 
-        {/* Right: Chat */}
-        <div className="w-56 shrink-0 flex flex-col gap-2">
-          <div className="md:hidden">
-            <PlayerList
-              players={gameState.players}
-              currentDrawerId={gameState.currentDrawerId}
-              myId={myId}
-            />
-          </div>
-          <div className="flex-1">
-            <Chat
-              messages={gameState.chat}
-              onSend={handleGuess}
-              disabled={chatDisabled}
-              placeholder={isDrawer ? "你是画手，不能猜" : hasGuessed ? "已猜对！" : "输入猜测..."}
-            />
-          </div>
+        {/* ── Right: Chat ── */}
+        {/* Mobile: fixed height below canvas. Desktop: sidebar */}
+        <div className="h-44 md:h-auto md:w-56 shrink-0 flex flex-col">
+          <Chat
+            messages={gameState.chat}
+            onSend={handleGuess}
+            disabled={chatDisabled}
+            placeholder={isDrawer ? "你是画手，不能猜" : hasGuessed ? "已猜对！" : "输入猜测..."}
+          />
         </div>
+
       </div>
     </div>
   )
