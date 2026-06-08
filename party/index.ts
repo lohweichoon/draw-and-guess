@@ -12,6 +12,11 @@ export default class GameServer implements Party.Server {
   private timer: ReturnType<typeof setInterval> | null = null
   private hintTimer: ReturnType<typeof setTimeout> | null = null
 
+  // Track which char indices have been revealed as hints
+  private revealedIndices: Set<number> = new Set()
+  // Track whether any correct guess happened this turn (for penalty logic)
+  private anyCorrectThisTurn = false
+
   constructor(readonly room: Party.Room) {
     this.state = this.initState()
   }
@@ -42,21 +47,18 @@ export default class GameServer implements Party.Server {
 
     this.state.players = this.state.players.filter((p) => p.id !== conn.id)
 
-    // Re-assign host if needed
     if (this.state.players.length > 0 && !this.state.players.some((p) => p.isHost)) {
       this.state.players[0].isHost = true
     }
 
     this.addSystem(`${leavingPlayer.name} 离开了游戏`)
 
-    // If current drawer left during a game, end the round
     if (this.state.phase === "drawing" && this.state.currentDrawerId === conn.id) {
-      this.endRound()
+      this.endRound(true)
     } else {
       this.broadcastState()
     }
 
-    // If no one left, reset
     if (this.state.players.length === 0) {
       this.stopTimer()
       this.state = this.initState()
@@ -98,7 +100,6 @@ export default class GameServer implements Party.Server {
   onJoin(conn: Party.Connection, rawName: string) {
     if (this.state.players.find((p) => p.id === conn.id)) return
 
-    // Reject if game in progress (allow during lobby/gameEnd)
     if (this.state.phase === "drawing" || this.state.phase === "roundEnd") {
       conn.send(JSON.stringify({ type: "error", message: "游戏进行中，无法加入" }))
       return
@@ -112,9 +113,7 @@ export default class GameServer implements Party.Server {
 
     this.addSystem(`${name} 加入了游戏 👋`)
 
-    // Send full state + confirm join to new player
     conn.send(JSON.stringify({ type: "game-state", state: this.state }))
-    // Broadcast updated state to others
     this.broadcastState([conn.id])
   }
 
@@ -137,8 +136,6 @@ export default class GameServer implements Party.Server {
   onDraw(conn: Party.Connection, event: DrawEvent) {
     if (conn.id !== this.state.currentDrawerId) return
     if (this.state.phase !== "drawing") return
-
-    // Forward to everyone except the sender
     this.room.broadcast(JSON.stringify({ type: "draw", event }), [conn.id])
   }
 
@@ -161,29 +158,40 @@ export default class GameServer implements Party.Server {
 
     if (isCorrect) {
       player.hasGuessed = true
+      this.anyCorrectThisTurn = true
 
-      // Score: time bonus + order bonus
-      const alreadyGuessed = this.state.players.filter((p) => p.hasGuessed && p.id !== this.state.currentDrawerId).length
+      // ── Guesser score ──────────────────────────────────────────
+      // Time bonus: up to 300 pts depending on how fast they guessed
       const timePct = this.state.timeLeft / this.state.settings.drawTime
-      const timeBonus = Math.round(timePct * 200)
-      const orderBonus = Math.max(0, 100 - (alreadyGuessed - 1) * 25)
-      const earned = Math.max(30, timeBonus + orderBonus)
+      const timeBonus = Math.round(timePct * 300)
+      // Order bonus: first to guess gets most
+      const alreadyGuessed = this.state.players.filter(
+        (p) => p.hasGuessed && p.id !== this.state.currentDrawerId
+      ).length
+      const orderBonus = Math.max(0, 100 - (alreadyGuessed - 1) * 30)
+      const guesserEarned = Math.max(50, timeBonus + orderBonus)
+      player.score += guesserEarned
 
-      player.score += earned
+      // ── Drawer score: scales with how FAST the guess came ──────
+      // Fast guess = drew clearly = deserves more points
+      // 80%+ time left → 80 pts | 50-80% → 55 pts | 20-50% → 35 pts | <20% → 15 pts
+      const drawerEarned =
+        timePct >= 0.8 ? 80 :
+        timePct >= 0.5 ? 55 :
+        timePct >= 0.2 ? 35 : 15
 
       const drawer = this.state.players.find((p) => p.id === this.state.currentDrawerId)
-      if (drawer) drawer.score += 20
+      if (drawer) drawer.score += drawerEarned
 
-      this.addCorrect(player.name, earned)
+      this.addCorrect(player.name, guesserEarned, drawerEarned)
 
       // All non-drawers guessed?
       const nonDrawers = this.state.players.filter((p) => p.id !== this.state.currentDrawerId)
       if (nonDrawers.length > 0 && nonDrawers.every((p) => p.hasGuessed)) {
-        this.endRound()
+        this.endRound(false)
         return
       }
     } else {
-      // Check if close (optional: partial hint)
       const msg: ChatMessage = {
         id: genId(),
         playerId: conn.id,
@@ -215,7 +223,6 @@ export default class GameServer implements Party.Server {
   // ─── Game Logic ───────────────────────────────────────────────
 
   startTurn() {
-    // Skip drawer slots for disconnected players
     while (
       this.state.drawerIndex < this.state.drawerOrder.length &&
       !this.state.players.find((p) => p.id === this.state.drawerOrder[this.state.drawerIndex])
@@ -223,7 +230,6 @@ export default class GameServer implements Party.Server {
       this.state.drawerIndex++
     }
 
-    // End of drawer list = end of a round
     if (this.state.drawerIndex >= this.state.drawerOrder.length) {
       if (this.state.currentRound >= this.state.totalRounds) {
         this.endGame()
@@ -231,7 +237,6 @@ export default class GameServer implements Party.Server {
       }
       this.state.currentRound++
       this.state.drawerIndex = 0
-      // Rebuild drawer order from current players
       this.state.drawerOrder = this.state.players.map((p) => p.id)
       this.startTurn()
       return
@@ -239,6 +244,8 @@ export default class GameServer implements Party.Server {
 
     const drawerId = this.state.drawerOrder[this.state.drawerIndex]
     this.currentWord = getRandomWord()
+    this.revealedIndices = new Set()
+    this.anyCorrectThisTurn = false
 
     this.state.phase = "drawing"
     this.state.currentDrawerId = drawerId
@@ -249,10 +256,8 @@ export default class GameServer implements Party.Server {
     const drawerName = this.state.players.find((p) => p.id === drawerId)?.name ?? "?"
     this.addSystem(`✏️ ${drawerName} 来画了！猜猜看～`)
 
-    // Clear canvas for everyone
     this.room.broadcast(JSON.stringify({ type: "clear-canvas" }))
 
-    // Send word ONLY to drawer
     const drawerConn = this.room.getConnection(drawerId)
     drawerConn?.send(JSON.stringify({ type: "your-word", word: this.currentWord }))
 
@@ -260,10 +265,21 @@ export default class GameServer implements Party.Server {
     this.startTimer()
   }
 
-  endRound() {
+  endRound(drawerLeft = false) {
     this.stopTimer()
+
+    // ── Penalty: nobody guessed = drawer sabotaged (画烂了) ──────
+    if (!drawerLeft && !this.anyCorrectThisTurn) {
+      const drawer = this.state.players.find((p) => p.id === this.state.currentDrawerId)
+      if (drawer) {
+        const penalty = 30
+        drawer.score = Math.max(0, drawer.score - penalty)
+        this.addSystem(`😤 时间到！没人猜中，${drawer.name} 扣 ${penalty} 分`)
+      }
+    }
+
     this.state.phase = "roundEnd"
-    this.addSystem(`⏰ 答案是：【${this.currentWord}】`)
+    this.addSystem(`答案是：【${this.currentWord}】`)
     this.broadcastState()
 
     setTimeout(() => {
@@ -288,13 +304,41 @@ export default class GameServer implements Party.Server {
 
       if (this.state.timeLeft <= 0) {
         this.stopTimer()
-        this.endRound()
+        this.endRound(false)
         return
       }
 
-      // Lightweight timer broadcast
+      // ── Progressive hints ─────────────────────────────────────
+      // Reveal 1 random character at 50% time, another at 25% time
+      const drawTime = this.state.settings.drawTime
+      const at50 = Math.floor(drawTime * 0.5)
+      const at25 = Math.floor(drawTime * 0.25)
+
+      if (this.state.timeLeft === at50 || this.state.timeLeft === at25) {
+        this.revealOneChar()
+      }
+
       this.room.broadcast(JSON.stringify({ type: "timer", timeLeft: this.state.timeLeft }))
     }, 1000)
+  }
+
+  // Reveal one random hidden character in the word hint
+  revealOneChar() {
+    const chars = Array.from(this.currentWord)
+    const hiddenIndices = chars.map((_, i) => i).filter((i) => !this.revealedIndices.has(i))
+    if (hiddenIndices.length === 0) return
+
+    // Pick a random hidden index to reveal
+    const idx = hiddenIndices[Math.floor(hiddenIndices.length * 0.5)] // reveal middle-ish char
+    this.revealedIndices.add(idx)
+
+    // Rebuild hint with revealed chars
+    this.state.wordHint = chars
+      .map((c, i) => (this.revealedIndices.has(i) ? c : "_"))
+      .join("  ")
+
+    this.addSystem(`💡 提示：${this.state.wordHint}`)
+    this.broadcastState()
   }
 
   stopTimer() {
@@ -315,12 +359,12 @@ export default class GameServer implements Party.Server {
     this.trimChat()
   }
 
-  addCorrect(name: string, score: number) {
+  addCorrect(guesserName: string, guesserScore: number, drawerScore: number) {
     this.state.chat.push({
       id: genId(),
       playerId: "system",
       playerName: "",
-      text: `✅ ${name} 猜对了！+${score} 分`,
+      text: `✅ ${guesserName} 猜对了！+${guesserScore} 分　画手 +${drawerScore} 分`,
       msgType: "correct",
     })
     this.trimChat()
