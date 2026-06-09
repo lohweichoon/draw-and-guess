@@ -326,7 +326,8 @@ export default class GameServer implements Party.Server {
   revealOneChar() {
     const chars = Array.from(this.currentWord)
     const hiddenIndices = chars.map((_, i) => i).filter((i) => !this.revealedIndices.has(i))
-    if (hiddenIndices.length === 0) return
+    // Keep at least 1 character hidden — never fully reveal the answer
+    if (hiddenIndices.length <= 1) return
 
     // Pick a random hidden index to reveal
     const idx = hiddenIndices[Math.floor(hiddenIndices.length * 0.5)] // reveal middle-ish char
