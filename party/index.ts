@@ -124,7 +124,8 @@ export default class GameServer implements Party.Server {
     if (this.state.phase !== "lobby" && this.state.phase !== "gameEnd") return
 
     this.state.totalRounds = this.state.settings.totalRounds
-    this.state.drawerOrder = this.state.players.map((p) => p.id)
+    // Shuffle drawer order so first drawer is random each game
+    this.state.drawerOrder = [...this.state.players.map((p) => p.id)].sort(() => Math.random() - 0.5)
     this.state.drawerIndex = 0
     this.state.currentRound = 1
     this.state.chat = []
@@ -173,12 +174,12 @@ export default class GameServer implements Party.Server {
       player.score += guesserEarned
 
       // ── Drawer score: scales with how FAST the guess came ──────
-      // Fast guess = drew clearly = deserves more points
-      // 80%+ time left → 80 pts | 50-80% → 55 pts | 20-50% → 35 pts | <20% → 15 pts
+      // Raised ceiling so drawing skill is more meaningful vs guessing speed
+      // 80%+ time left → 150 pts | 50-80% → 100 pts | 20-50% → 60 pts | <20% → 25 pts
       const drawerEarned =
-        timePct >= 0.8 ? 80 :
-        timePct >= 0.5 ? 55 :
-        timePct >= 0.2 ? 35 : 15
+        timePct >= 0.8 ? 150 :
+        timePct >= 0.5 ? 100 :
+        timePct >= 0.2 ? 60 : 25
 
       const drawer = this.state.players.find((p) => p.id === this.state.currentDrawerId)
       if (drawer) drawer.score += drawerEarned
@@ -223,6 +224,9 @@ export default class GameServer implements Party.Server {
   // ─── Game Logic ───────────────────────────────────────────────
 
   startTurn() {
+    // Guard: if all players left (stale setTimeout from endRound), do nothing
+    if (this.state.players.length === 0) return
+
     while (
       this.state.drawerIndex < this.state.drawerOrder.length &&
       !this.state.players.find((p) => p.id === this.state.drawerOrder[this.state.drawerIndex])
@@ -268,13 +272,15 @@ export default class GameServer implements Party.Server {
   endRound(drawerLeft = false) {
     this.stopTimer()
 
-    // ── Penalty: nobody guessed = drawer sabotaged (画烂了) ──────
+    // ── Penalty: nobody guessed at all = likely sabotage ──────────
+    // Only penalise when zero guesses happened (not just "some didn't guess")
+    // Reduced to 20 pts to avoid punishing genuinely hard words too harshly
     if (!drawerLeft && !this.anyCorrectThisTurn) {
       const drawer = this.state.players.find((p) => p.id === this.state.currentDrawerId)
       if (drawer) {
-        const penalty = 30
+        const penalty = 20
         drawer.score = Math.max(0, drawer.score - penalty)
-        this.addSystem(`😤 时间到！没人猜中，${drawer.name} 扣 ${penalty} 分`)
+        this.addSystem(`😤 没人猜中，${drawer.name} 扣 ${penalty} 分`)
       }
     }
 
@@ -329,8 +335,8 @@ export default class GameServer implements Party.Server {
     // Keep at least 1 character hidden — never fully reveal the answer
     if (hiddenIndices.length <= 1) return
 
-    // Pick a random hidden index to reveal
-    const idx = hiddenIndices[Math.floor(hiddenIndices.length * 0.5)] // reveal middle-ish char
+    // Pick a truly random hidden character to reveal
+    const idx = hiddenIndices[Math.floor(Math.random() * hiddenIndices.length)]
     this.revealedIndices.add(idx)
 
     // Rebuild hint with revealed chars
