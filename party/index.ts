@@ -1,6 +1,6 @@
 import type * as Party from "partykit/server"
 import type { ChatMessage, DrawEvent, GameState, Player, RoomSettings } from "../lib/types"
-import { getRandomWord, getWordHint } from "../lib/words"
+import { WORDS_ZH, getWordHint } from "../lib/words"
 
 function genId(): string {
   return Math.random().toString(36).slice(2, 10)
@@ -16,6 +16,8 @@ export default class GameServer implements Party.Server {
   private revealedIndices: Set<number> = new Set()
   // Track whether any correct guess happened this turn (for penalty logic)
   private anyCorrectThisTurn = false
+  // Track used words within a game — reset each new game
+  private usedWords: Set<string> = new Set()
 
   constructor(readonly room: Party.Room) {
     this.state = this.initState()
@@ -130,6 +132,8 @@ export default class GameServer implements Party.Server {
     this.state.currentRound = 1
     this.state.chat = []
     this.state.players.forEach((p) => { p.score = 0; p.hasGuessed = false })
+    // Reset used words for a fresh game
+    this.usedWords = new Set()
 
     this.startTurn()
   }
@@ -223,6 +227,16 @@ export default class GameServer implements Party.Server {
 
   // ─── Game Logic ───────────────────────────────────────────────
 
+  pickUnusedWord(): string {
+    const available = WORDS_ZH.filter((w) => !this.usedWords.has(w))
+    if (available.length === 0) {
+      // All 120 words exhausted (very long game) — reset and reuse
+      this.usedWords.clear()
+      return WORDS_ZH[Math.floor(Math.random() * WORDS_ZH.length)]
+    }
+    return available[Math.floor(Math.random() * available.length)]
+  }
+
   startTurn() {
     // Guard: if all players left (stale setTimeout from endRound), do nothing
     if (this.state.players.length === 0) return
@@ -247,7 +261,8 @@ export default class GameServer implements Party.Server {
     }
 
     const drawerId = this.state.drawerOrder[this.state.drawerIndex]
-    this.currentWord = getRandomWord()
+    this.currentWord = this.pickUnusedWord()
+    this.usedWords.add(this.currentWord)
     this.revealedIndices = new Set()
     this.anyCorrectThisTurn = false
 
