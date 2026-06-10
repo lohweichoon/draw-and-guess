@@ -317,7 +317,7 @@ export default function RoomPage() {
   const timerColor = timePct > 0.5 ? "bg-green-500" : timePct > 0.25 ? "bg-yellow-500" : "bg-red-500"
 
   return (
-    <div className="h-dvh flex flex-col overflow-hidden max-w-7xl mx-auto w-full">
+    <div className="fixed inset-0 flex flex-col overflow-hidden max-w-7xl mx-auto w-full">
 
       {/* ── Header ── */}
       <div className="flex items-center gap-2 px-2 pt-2 pb-1 shrink-0">
