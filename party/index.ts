@@ -16,8 +16,9 @@ export default class GameServer implements Party.Server {
   private revealedIndices: Set<number> = new Set()
   // Track whether any correct guess happened this turn (for penalty logic)
   private anyCorrectThisTurn = false
-  // Track used words within a game — reset each new game
+  // Track used words across ALL games in this room — persisted via storage
   private usedWords: Set<string> = new Set()
+  private usedWordsLoaded = false
 
   constructor(readonly room: Party.Room) {
     this.state = this.initState()
@@ -40,6 +41,12 @@ export default class GameServer implements Party.Server {
   }
 
   async onConnect(conn: Party.Connection) {
+    // Load persisted used-words from storage on first connection after hibernation
+    if (!this.usedWordsLoaded) {
+      const stored = await this.room.storage.get<string[]>("usedWords")
+      if (stored && stored.length > 0) this.usedWords = new Set(stored)
+      this.usedWordsLoaded = true
+    }
     conn.send(JSON.stringify({ type: "game-state", state: this.state }))
   }
 
@@ -132,8 +139,7 @@ export default class GameServer implements Party.Server {
     this.state.currentRound = 1
     this.state.chat = []
     this.state.players.forEach((p) => { p.score = 0; p.hasGuessed = false })
-    // Reset used words for a fresh game
-    this.usedWords = new Set()
+    // usedWords intentionally NOT reset here — persists across games in same room
 
     this.startTurn()
   }
@@ -230,11 +236,18 @@ export default class GameServer implements Party.Server {
   pickUnusedWord(): string {
     const available = WORDS_ZH.filter((w) => !this.usedWords.has(w))
     if (available.length === 0) {
-      // All 120 words exhausted (very long game) — reset and reuse
+      // All ~241 words exhausted — clear and start fresh cycle
       this.usedWords.clear()
+      this.room.storage.delete("usedWords").catch(() => {})
       return WORDS_ZH[Math.floor(Math.random() * WORDS_ZH.length)]
     }
-    return available[Math.floor(Math.random() * available.length)]
+    const word = available[Math.floor(Math.random() * available.length)]
+    return word
+  }
+
+  saveUsedWords() {
+    // Fire-and-forget: persist to storage so it survives room hibernation
+    this.room.storage.put("usedWords", [...this.usedWords]).catch(() => {})
   }
 
   startTurn() {
@@ -263,6 +276,7 @@ export default class GameServer implements Party.Server {
     const drawerId = this.state.drawerOrder[this.state.drawerIndex]
     this.currentWord = this.pickUnusedWord()
     this.usedWords.add(this.currentWord)
+    this.saveUsedWords()
     this.revealedIndices = new Set()
     this.anyCorrectThisTurn = false
 
