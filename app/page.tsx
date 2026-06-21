@@ -3,20 +3,19 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 
-function genRoomId() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase()
-}
-
 export default function Home() {
   const router = useRouter()
   const [name, setName] = useState("")
+  const [room, setRoom] = useState("")
   const [error, setError] = useState("")
 
-  function handleCreate() {
+  function handleEnter() {
     const n = name.trim()
+    const r = room.trim().toLowerCase().replace(/[^a-z0-9-]/g, "")
     if (!n) { setError("请输入你的名字"); return }
+    if (!r) { setError("请输入房间名"); return }
     sessionStorage.setItem("playerName", n)
-    router.push(`/room/${genRoomId()}`)
+    router.push(`/room/${r}`)
   }
 
   return (
@@ -28,28 +27,47 @@ export default function Home() {
       </div>
 
       <div className="w-full max-w-sm bg-gray-900 rounded-2xl p-6 shadow-xl">
-        <label className="block text-sm text-gray-400 mb-1.5">你的名字</label>
-        <input
-          autoFocus
-          className="w-full bg-gray-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-indigo-500 mb-5"
-          placeholder="输入名字..."
-          value={name}
-          onChange={(e) => { setName(e.target.value); setError("") }}
-          maxLength={16}
-          onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-        />
+        <div className="mb-4">
+          <label className="block text-sm text-gray-400 mb-1.5">你的名字</label>
+          <input
+            autoFocus
+            className="w-full bg-gray-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder="输入名字..."
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError("") }}
+            maxLength={16}
+            onKeyDown={(e) => e.key === "Enter" && handleEnter()}
+          />
+        </div>
+
+        <div className="mb-5">
+          <label className="block text-sm text-gray-400 mb-1.5">房间名</label>
+          <input
+            className="w-full bg-gray-800 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+            placeholder="nice"
+            value={room}
+            onChange={(e) => { setRoom(e.target.value); setError("") }}
+            maxLength={20}
+            onKeyDown={(e) => e.key === "Enter" && handleEnter()}
+          />
+          {room.trim() && (
+            <p className="text-gray-500 text-xs mt-1.5 font-mono truncate">
+              /room/{room.trim().toLowerCase().replace(/[^a-z0-9-]/g, "")}
+            </p>
+          )}
+        </div>
 
         {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
 
         <button
-          onClick={handleCreate}
+          onClick={handleEnter}
           className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition-colors"
         >
-          🎲 创建新房间
+          进入房间
         </button>
 
         <p className="text-gray-600 text-xs text-center mt-4">
-          加入朋友的房间？点击他们分享的链接即可
+          同一个房间名 = 同一个房间
         </p>
       </div>
 
